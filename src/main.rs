@@ -13,7 +13,7 @@ use tokio_core::reactor::Handle;
 use futures::*;
 use futures::stream::Stream;
 
-use hyper::{Client, Uri, Error};
+use hyper::{Client, Uri, Error, header};
 use hyper::client::HttpConnector;
 
 fn main() {
@@ -75,8 +75,10 @@ impl HttpClient {
   pub fn call(&self, url: &Uri) -> impl Future<Item = (), Error = hyper::Error> {
     let id: u32 = self.id.clone();
     self.client.get(url.clone()).and_then(move |res| {
-        println!("[{}] Response: {}", id, res.status());
-        //println!("Headers: \n{}", res.headers());
+        println!("[{}] Response ({}): {}", id, res.version(), res.status());
+        println!("Headers: \n{}", res.headers());
+        let conn: Option<&header::Connection> = res.headers().get();
+        println!("Connection: {:?}", conn);
 
         /*
         res.body().for_each(|chunk| {
