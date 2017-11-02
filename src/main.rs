@@ -42,13 +42,17 @@ fn main() {
         .build(&handle);
     */
 
-    let client = HttpClient::new(&handle, 0);
 
-    let mut stream = stream::repeat::<_, Error>(10);
+    let work = future::join_all((1..10).map(|id| {
+      let client = HttpClient::new(&handle, id);
 
-    let work = stream.for_each(move |_| {
-      client.call(&url)
-    });
+      let stream = stream::repeat::<_, Error>(id);
+      let u = url.clone();
+
+      stream.for_each(move |_| {
+        client.call(&u)
+      })
+    }));
 
     core.run(work).unwrap();
 }
@@ -69,9 +73,10 @@ impl HttpClient {
   }
 
   pub fn call(&self, url: &Uri) -> impl Future<Item = (), Error = hyper::Error> {
-    self.client.get(url.clone()).and_then(|res| {
-        println!("Response: {}", res.status());
-        println!("Headers: \n{}", res.headers());
+    let id: u32 = self.id.clone();
+    self.client.get(url.clone()).and_then(move |res| {
+        println!("[{}] Response: {}", id, res.status());
+        //println!("Headers: \n{}", res.headers());
 
         /*
         res.body().for_each(|chunk| {
