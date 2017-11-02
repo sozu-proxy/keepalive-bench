@@ -1,15 +1,20 @@
+#![feature(conservative_impl_trait)]
+
 extern crate futures;
 extern crate hyper;
 extern crate tokio_core;
 
 extern crate pretty_env_logger;
+
 use std::env;
 use std::io::{self, Write};
 
+use tokio_core::reactor::Handle;
 use futures::Future;
 use futures::stream::Stream;
 
-use hyper::Client;
+use hyper::{Client, Uri, Error};
+use hyper::client::HttpConnector;
 
 fn main() {
     pretty_env_logger::init().unwrap();
@@ -32,18 +37,55 @@ fn main() {
     let handle = core.handle();
     let client = Client::configure()
         .no_proto()
+        // default true: .keep_alive(true)
         .build(&handle);
 
     let work = client.get(url).and_then(|res| {
         println!("Response: {}", res.status());
         println!("Headers: \n{}", res.headers());
 
+        /*
         res.body().for_each(|chunk| {
             io::stdout().write_all(&chunk).map_err(From::from)
         })
+        */
+        Ok(())
     }).map(|_| {
         println!("\n\nDone.");
     });
 
     core.run(work).unwrap();
+}
+
+struct HttpClient {
+  client: Client<HttpConnector>,
+  id:     u32,
+}
+
+impl HttpClient {
+  pub fn new(handle: &Handle, id: u32) -> HttpClient {
+    let client = Client::configure()
+        .no_proto()
+        // default true: .keep_alive(true)
+        .build(&handle);
+
+    HttpClient { client, id }
+  }
+
+  pub fn call(&self, url: Uri) -> impl Future<Item = (), Error = hyper::Error> {
+    self.client.get(url).and_then(|res| {
+        println!("Response: {}", res.status());
+        println!("Headers: \n{}", res.headers());
+
+        /*
+        res.body().for_each(|chunk| {
+            io::stdout().write_all(&chunk).map_err(From::from)
+        })
+        */
+        Ok(())
+    })
+    /*.map(|_| {
+        println!("\n\nDone.");
+    });*/
+  }
 }
