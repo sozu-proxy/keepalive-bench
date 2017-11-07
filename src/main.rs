@@ -77,9 +77,12 @@ impl HttpClient {
   }
 
   pub fn call(&self, url: &Uri) -> impl Future<Item = (), Error = hyper::Error> {
-    let id: u32 = self.id.clone();
-    let shared_writer = self.writer.clone();
-    let start = self.start.clone();
+    let id: u32  = self.id.clone();
+    let id2: u32 = self.id.clone();
+    let shared_writer  = self.writer.clone();
+    let shared_writer2 = self.writer.clone();
+    let start  = self.start.clone();
+    let start2 = self.start.clone();
 
     self.client.get(url.clone()).and_then(move |res| {
         let duration = start.elapsed();
@@ -89,30 +92,42 @@ impl HttpClient {
 
         let status_code = res.status().as_u16();
 
-        let backend_id: u32 = res.headers().get_raw("Backend-Id").expect("Backend-Id header not found")
-                        .one().and_then(|val| str::from_utf8(val).ok()).expect("there should be only one value")
-                        .parse().expect("could not parse id");
-        let backend_connection_port: u32 = res.headers().get_raw("Source-Port").expect("Backend-Id header not found")
-                        .one().and_then(|val| str::from_utf8(val).ok()).expect("there should be only one value")
-                        .parse().expect("could not parse id");
+        if let Some(backend_id_header) = res.headers().get_raw("Backend-Id") {
+          let backend_id: u32 = backend_id_header.one().and_then(|val| str::from_utf8(val).ok())
+                          .expect("there should be only one value")
+                          .parse().expect("could not parse id");
+          let backend_connection_port: u32 = res.headers().get_raw("Source-Port").expect("Source-Port header not found")
+                          .one().and_then(|val| str::from_utf8(val).ok()).expect("there should be only one value")
+                          .parse().expect("could not parse id");
 
-        println!("[{}] client: {} status: {} backend: {} port: {}", elapsed, id, status_code, backend_id, backend_connection_port);
+          println!("[{}] client: {} status: {} backend: {} port: {}", elapsed, id, status_code, backend_id, backend_connection_port);
 
-        if let Ok(mut writer) = shared_writer.try_lock() {
-          writer.write_record(&[format!("{}", elapsed), format!("{}", id), format!("{}", status_code),
-            format!("{}", backend_id), format!("{}", backend_connection_port)]);
+          if let Ok(mut writer) = shared_writer.try_lock() {
+            writer.write_record(&[format!("{}", elapsed), format!("{}", id), format!("{}", status_code),
+              format!("{}", backend_id), format!("{}", backend_connection_port)]);
+          }
+        } else {
+          println!("[{}] client: {} status: {} backend not available", elapsed, id, status_code);
+
+          if let Ok(mut writer) = shared_writer.try_lock() {
+            writer.write_record(&[format!("{}", elapsed), format!("{}", id), format!("{}", status_code),
+              "".to_string(), "".to_string()]);
+          }
         }
 
-        //println!("Headers: \n{}", res.headers());
-        //let conn: Option<&header::Connection> = res.headers().get();
-        //println!("version: {}\n, headers: {}\n Connection: {:?}", res.version(), res.headers(), conn);
-
-        /*
-        res.body().for_each(|chunk| {
-            io::stdout().write_all(&chunk).map_err(From::from)
-        })
-        */
         Ok(())
+    }).or_else(move |e| {
+      let duration = start2.elapsed();
+      let secs     = duration.as_secs();
+      let nano     = duration.subsec_nanos();
+      let elapsed  = (nano / 1000000) as u64 + (secs * 1000);
+
+      println!("[{}] client: {} got error: {:?}", elapsed, id, e);
+      if let Ok(mut writer) = shared_writer2.try_lock() {
+        writer.write_record(&[format!("{}", elapsed), format!("{}", id2), format!("{}", e),
+          "".to_string(), "".to_string()]);
+      }
+      Ok(())
     })
     /*.map(|_| {
         println!("\n\nDone.");
