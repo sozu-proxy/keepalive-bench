@@ -6,7 +6,7 @@ extern crate tokio_core;
 
 extern crate pretty_env_logger;
 
-use std::env;
+use std::{env,str};
 use std::io::{self, Write};
 
 use tokio_core::reactor::Handle;
@@ -35,15 +35,8 @@ fn main() {
 
     let mut core = tokio_core::reactor::Core::new().unwrap();
     let handle = core.handle();
-    /*
-    let client = Client::configure()
-        .no_proto()
-        // default true: .keep_alive(true)
-        .build(&handle);
-    */
 
-
-    let work = future::join_all((1..10).map(|id| {
+    let work = future::join_all((1..3).map(|id| {
       let client = HttpClient::new(&handle, id);
 
       let stream = stream::repeat::<_, Error>(id);
@@ -65,7 +58,8 @@ struct HttpClient {
 impl HttpClient {
   pub fn new(handle: &Handle, id: u32) -> HttpClient {
     let client = Client::configure()
-        .no_proto()
+        //.no_proto() if you do that there will be no keep alive
+        .keep_alive(true)
         // default true: .keep_alive(true)
         .build(&handle);
 
@@ -75,10 +69,14 @@ impl HttpClient {
   pub fn call(&self, url: &Uri) -> impl Future<Item = (), Error = hyper::Error> {
     let id: u32 = self.id.clone();
     self.client.get(url.clone()).and_then(move |res| {
-        println!("[{}] Response ({}): {}", id, res.version(), res.status());
-        println!("Headers: \n{}", res.headers());
-        let conn: Option<&header::Connection> = res.headers().get();
-        println!("Connection: {:?}", conn);
+        let backend_id: u32 = res.headers().get_raw("Backend-Id").expect("Backend-Id header not found")
+                        .one().and_then(|val| str::from_utf8(val).ok()).expect("there should be only one value")
+                        .parse().expect("could not parse id");
+        println!("[{}] {} from {}", id, res.status(), backend_id);
+
+        //println!("Headers: \n{}", res.headers());
+        //let conn: Option<&header::Connection> = res.headers().get();
+        //println!("version: {}\n, headers: {}\n Connection: {:?}", res.version(), res.headers(), conn);
 
         /*
         res.body().for_each(|chunk| {
