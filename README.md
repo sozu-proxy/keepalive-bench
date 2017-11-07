@@ -1,0 +1,12 @@
+starting the backends:
+- node assets/server.js 0 1030 &
+- node assets/server.js 1 1031 &
+- node assets/server.js 2 1032 &
+- node assets/server.js 3 1033 &
+- sozu start -c config.toml
+- sozu is now started with the two first servers
+- cargo run http://lolcatho.st:8080/
+- sozuctl -c config.toml backend add --id MyApp --ip 127.0.0.1 --port 1032
+- we now added a backend server
+- sozuctl -c config.toml backend remove --id MyApp --ip 127.0.0.1 --port 1030
+- we now removed a backend server
