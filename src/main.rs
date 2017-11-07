@@ -75,7 +75,7 @@ impl HttpClient {
         let backend_connection_port: u32 = res.headers().get_raw("Source-Port").expect("Backend-Id header not found")
                         .one().and_then(|val| str::from_utf8(val).ok()).expect("there should be only one value")
                         .parse().expect("could not parse id");
-        println!("[{}] {} backend: {} port: {}", id, res.status(), backend_id, backend_connection_port);
+        println!("[{}] {} backend: {} port: {}", id, res.status().as_u16(), backend_id, backend_connection_port);
 
         //println!("Headers: \n{}", res.headers());
         //let conn: Option<&header::Connection> = res.headers().get();
