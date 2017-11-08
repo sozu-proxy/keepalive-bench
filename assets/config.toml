@@ -23,7 +23,7 @@ buffer_size = 16384
 [applications]
 
 [applications.MyApp]
-hostname   = "lolcatho.st"
+hostname   = "localhost"
 frontends = ["HTTP"] # list of proxy tags
 backends  = [ "127.0.0.1:1030", "127.0.0.1:1031" ] # list of IP/port
 

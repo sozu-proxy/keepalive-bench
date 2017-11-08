@@ -1,0 +1,24 @@
+logLevel = "DEBUG"
+
+defaultEntryPoints = ["http"]
+
+[entryPoints]
+    [entryPoints.http]
+    address = "127.0.0.1:8080"
+
+#    [frontends.frontend1.routes.test_1]
+#    rule = "Host:http://lolcatho.st:8080/"
+
+[web]
+address = ":7878"
+
+[file]
+  [backends]
+    [backends.bench]
+      [backends.bench.servers.server4]
+      url = "http://127.0.0.1:1033"
+      [backends.bench.servers.server3]
+      url = "http://127.0.0.1:1032"
+  [frontends]
+    [frontends.frontend1]
+    backend = "bench"
