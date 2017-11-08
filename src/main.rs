@@ -41,7 +41,7 @@ fn main() {
     let handle = core.handle();
 
     let mut wtr = csv::Writer::from_path("data.csv").expect("could not open path to data file");
-    wtr.write_record(&["time", "client", "status", "backend", "source"]);
+    wtr.write_record(&["time", "client", "status", "instance", "front port", "back port"]);
 
     let shared_wtr = Arc::new(Mutex::new(wtr));
     let shared_status = Arc::new(Mutex::new(Status::new()));
@@ -133,8 +133,18 @@ impl HttpClient {
                           .one().and_then(|val| str::from_utf8(val).ok()).expect("there should be only one value")
                           .parse().expect("could not parse id");
 
-          print!("\r[{}] client: {} status: {} backend: {} port: {}                           ",
-            elapsed, id, status_code, backend_id, backend_connection_port);
+          let port_number = if let Ok(mut port) = frontend_port.try_lock() {
+              if let Some(p) = *port {
+                format!("{}", p)
+              } else {
+              "".to_string()
+              }
+            } else {
+              "".to_string()
+            };
+
+          print!("\r[{}] client: {} status: {} front: {} instance: {} back: {}                           ",
+            elapsed, id, status_code, port_number, backend_id, backend_connection_port);
 
           if let Ok(mut st) = status.try_lock() {
             st.success += 1;
@@ -157,10 +167,21 @@ impl HttpClient {
 
           if let Ok(mut writer) = shared_writer.try_lock() {
             writer.write_record(&[format!("{}", elapsed), format!("{}", id), format!("{}", status_code),
-              format!("{}", backend_id), format!("{}", backend_connection_port)]);
+              format!("{}", backend_id), port_number, format!("{}", backend_connection_port)]);
           }
         } else {
-          print!("\r[{}] client: {} status: {} backend not available                      ", elapsed, id, status_code);
+          let port_number = if let Ok(mut port) = frontend_port.try_lock() {
+              if let Some(p) = *port {
+                format!("{}", p)
+              } else {
+              "".to_string()
+              }
+            } else {
+              "".to_string()
+            };
+
+          print!("\r[{}] client: {} status: {} front: {} backend not available                      ",
+            elapsed, id, status_code, port_number);
 
           if let Ok(mut st) = status.try_lock() {
             st.failure += 1;
@@ -170,8 +191,11 @@ impl HttpClient {
           }
 
           if let Ok(mut writer) = shared_writer.try_lock() {
-            writer.write_record(&[format!("{}", elapsed), format!("{}", id), format!("{}", status_code),
-              "".to_string(), "".to_string()]);
+            if let Ok(mut port) = frontend_port.try_lock() {
+
+              writer.write_record(&[format!("{}", elapsed), format!("{}", id), format!("{}", status_code),
+                "".to_string(), port_number, "".to_string()]);
+            }
           }
         }
 
@@ -192,7 +216,7 @@ impl HttpClient {
 
       if let Ok(mut writer) = shared_writer2.try_lock() {
         writer.write_record(&[format!("{}", elapsed), format!("{}", id2), format!("{}", e),
-          "".to_string(), "".to_string()]);
+          "".to_string(), "".to_string(), "".to_string()]);
       }
       Ok(())
     })
