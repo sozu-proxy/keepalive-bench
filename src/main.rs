@@ -42,10 +42,11 @@ fn main() {
     wtr.write_record(&["time", "client", "status", "backend", "source"]);
 
     let shared_wtr = Arc::new(Mutex::new(wtr));
+    let shared_status = Arc::new(Mutex::new(Status::new()));
     let start = time::Instant::now();
 
     let work = future::join_all((1..10).map(|id| {
-      let client = HttpClient::new(&handle, id, shared_wtr.clone(), start.clone());
+      let client = HttpClient::new(&handle, id, shared_wtr.clone(), start.clone(), shared_status.clone());
 
       let stream = stream::repeat::<_, Error>(id);
       let u = url.clone();
@@ -58,31 +59,49 @@ fn main() {
     core.run(work).unwrap();
 }
 
+struct Status {
+  success: u64,
+  failure: u64,
+}
+
+impl Status {
+  pub fn new() -> Status {
+    Status {
+      success: 0,
+      failure: 0,
+    }
+  }
+}
+
 struct HttpClient {
   client: Client<HttpConnector>,
   id:     u32,
   writer: Arc<Mutex<csv::Writer<File>>>,
   start:  time::Instant,
+  status: Arc<Mutex<Status>>,
 }
 
 impl HttpClient {
-  pub fn new(handle: &Handle, id: u32, writer: Arc<Mutex<csv::Writer<File>>>, start: time::Instant) -> HttpClient {
+  pub fn new(handle: &Handle, id: u32, writer: Arc<Mutex<csv::Writer<File>>>, start: time::Instant, status: Arc<Mutex<Status>>) -> HttpClient {
     let client = Client::configure()
         //.no_proto() if you do that there will be no keep alive
         .keep_alive(true)
         // default true: .keep_alive(true)
         .build(&handle);
 
-    HttpClient { client, id, writer, start }
+    HttpClient { client, id, writer, start, status }
   }
 
   pub fn call(&self, url: &Uri) -> impl Future<Item = (), Error = hyper::Error> {
-    let id: u32  = self.id.clone();
+    let id:  u32 = self.id.clone();
     let id2: u32 = self.id.clone();
     let shared_writer  = self.writer.clone();
     let shared_writer2 = self.writer.clone();
     let start  = self.start.clone();
     let start2 = self.start.clone();
+    let status  = self.status.clone();
+    let status2 = self.status.clone();
+
 
     self.client.get(url.clone()).and_then(move |res| {
         let duration = start.elapsed();
@@ -100,14 +119,27 @@ impl HttpClient {
                           .one().and_then(|val| str::from_utf8(val).ok()).expect("there should be only one value")
                           .parse().expect("could not parse id");
 
-          println!("[{}] client: {} status: {} backend: {} port: {}", elapsed, id, status_code, backend_id, backend_connection_port);
+          print!("\r[{}] client: {} status: {} backend: {} port: {}",
+            elapsed, id, status_code, backend_id, backend_connection_port);
+
+          if let Ok(mut st) = status.try_lock() {
+            st.success += 1;
+            print!("\n[{}] success: {} failure: {}", elapsed, st.success, st.failure);
+            io::stdout().flush().unwrap();
+          }
 
           if let Ok(mut writer) = shared_writer.try_lock() {
             writer.write_record(&[format!("{}", elapsed), format!("{}", id), format!("{}", status_code),
               format!("{}", backend_id), format!("{}", backend_connection_port)]);
           }
         } else {
-          println!("[{}] client: {} status: {} backend not available", elapsed, id, status_code);
+          print!("\r[{}] client: {} status: {} backend not available", elapsed, id, status_code);
+
+          if let Ok(mut st) = status.try_lock() {
+            st.failure += 1;
+            print!("\n[{}] success: {} failure: {}", elapsed, st.success, st.failure);
+            io::stdout().flush().unwrap();
+          }
 
           if let Ok(mut writer) = shared_writer.try_lock() {
             writer.write_record(&[format!("{}", elapsed), format!("{}", id), format!("{}", status_code),
@@ -122,7 +154,13 @@ impl HttpClient {
       let nano     = duration.subsec_nanos();
       let elapsed  = (nano / 1000000) as u64 + (secs * 1000);
 
-      println!("[{}] client: {} got error: {:?}", elapsed, id, e);
+      print!("\r[{}] client: {} got error: {:?}", elapsed, id, e);
+      if let Ok(mut st) = status2.try_lock() {
+        st.failure += 1;
+        print!("\n[{}] success: {} failure: {}", elapsed, st.success, st.failure);
+        io::stdout().flush().unwrap();
+      }
+
       if let Ok(mut writer) = shared_writer2.try_lock() {
         writer.write_record(&[format!("{}", elapsed), format!("{}", id2), format!("{}", e),
           "".to_string(), "".to_string()]);
