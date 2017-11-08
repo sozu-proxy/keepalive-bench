@@ -47,7 +47,7 @@ fn main() {
     let shared_status = Arc::new(Mutex::new(Status::new()));
     let start = time::Instant::now();
 
-    let work = future::join_all((1..10).map(|id| {
+    let work = future::join_all((0..10).map(|id| {
       let client = HttpClient::new(&handle, id, shared_wtr.clone(), start.clone(), shared_status.clone());
 
       let stream = stream::repeat::<_, Error>(id);
