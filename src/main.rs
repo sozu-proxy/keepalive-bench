@@ -12,11 +12,13 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use tokio_core::reactor::Handle;
+use tokio_core::net::TcpStream;
+
 use futures::*;
 use futures::stream::Stream;
 
 use hyper::{Client, Uri, Error, header};
-use hyper::client::HttpConnector;
+use hyper::client::{HttpConnector,Service};
 
 fn main() {
     pretty_env_logger::init().unwrap();
@@ -63,6 +65,7 @@ struct Status {
   success: u64,
   failure: u64,
   backend_connection_closed: u64,
+  frontend_connection_closed: u64,
 }
 
 impl Status {
@@ -71,29 +74,34 @@ impl Status {
       success: 0,
       failure: 0,
       backend_connection_closed: 0,
+      frontend_connection_closed: 0,
     }
   }
 }
 
 struct HttpClient {
-  client: Client<HttpConnector>,
+  client: Client<DebugConnector>,
   id:     u32,
   writer: Arc<Mutex<csv::Writer<File>>>,
   start:  time::Instant,
   status: Arc<Mutex<Status>>,
   backend_port: Arc<Mutex<Option<u32>>>,
+  frontend_port: Arc<Mutex<Option<u16>>>,
 }
 
 impl HttpClient {
   pub fn new(handle: &Handle, id: u32, writer: Arc<Mutex<csv::Writer<File>>>, start: time::Instant, status: Arc<Mutex<Status>>) -> HttpClient {
+    let frontend_port = Arc::new(Mutex::new(None));
+
     let client = Client::configure()
+        .connector(DebugConnector(HttpConnector::new(1, &handle), frontend_port.clone(), status.clone()))
         //.no_proto() if you do that there will be no keep alive
         .keep_alive(true)
         // default true: .keep_alive(true)
         .build(&handle);
 
     let backend_port = Arc::new(Mutex::new(None));
-    HttpClient { client, id, writer, start, status, backend_port }
+    HttpClient { client, id, writer, start, status, backend_port, frontend_port }
   }
 
   pub fn call(&self, url: &Uri) -> impl Future<Item = (), Error = hyper::Error> {
@@ -106,6 +114,7 @@ impl HttpClient {
     let status  = self.status.clone();
     let status2 = self.status.clone();
 
+    let frontend_port = self.frontend_port.clone();
     let backend_port = self.backend_port.clone();
 
     self.client.get(url.clone()).and_then(move |res| {
@@ -124,7 +133,7 @@ impl HttpClient {
                           .one().and_then(|val| str::from_utf8(val).ok()).expect("there should be only one value")
                           .parse().expect("could not parse id");
 
-          print!("\r[{}] client: {} status: {} backend: {} port: {}          ",
+          print!("\r[{}] client: {} status: {} backend: {} port: {}                           ",
             elapsed, id, status_code, backend_id, backend_connection_port);
 
           if let Ok(mut st) = status.try_lock() {
@@ -141,8 +150,8 @@ impl HttpClient {
 
             }
 
-            print!("\n[{}] success: {} failure: {}, backend keepalive closed: {}",
-              elapsed, st.success, st.failure, st.backend_connection_closed);
+            print!("\n[{}] success: {} failure: {}, front changed: {} back changed: {}",
+              elapsed, st.success, st.failure, st.frontend_connection_closed, st.backend_connection_closed);
             io::stdout().flush().unwrap();
           }
 
@@ -151,12 +160,12 @@ impl HttpClient {
               format!("{}", backend_id), format!("{}", backend_connection_port)]);
           }
         } else {
-          print!("\r[{}] client: {} status: {} backend not available", elapsed, id, status_code);
+          print!("\r[{}] client: {} status: {} backend not available                      ", elapsed, id, status_code);
 
           if let Ok(mut st) = status.try_lock() {
             st.failure += 1;
-            print!("\n[{}] success: {} failure: {}, backend keepalive closed: {}          ",
-              elapsed, st.success, st.failure, st.backend_connection_closed);
+            print!("\n[{}] success: {} failure: {}, front changed: {} back changed: {}",
+              elapsed, st.success, st.failure, st.frontend_connection_closed, st.backend_connection_closed);
             io::stdout().flush().unwrap();
           }
 
@@ -173,11 +182,11 @@ impl HttpClient {
       let nano     = duration.subsec_nanos();
       let elapsed  = (nano / 1000000) as u64 + (secs * 1000);
 
-      print!("\r[{}] client: {} got error: {:?}                                 ", elapsed, id, e);
+      print!("\r[{}] client: {} got error: {:?}                                           ", elapsed, id, e);
       if let Ok(mut st) = status2.try_lock() {
         st.failure += 1;
-        print!("\n[{}] success: {} failure: {}, backend keepalive closed: {}",
-          elapsed, st.success, st.failure, st.backend_connection_closed);
+        print!("\n[{}] success: {} failure: {}, front changed: {} back changed: {}",
+          elapsed, st.success, st.failure, st.frontend_connection_closed, st.backend_connection_closed);
         io::stdout().flush().unwrap();
       }
 
@@ -190,5 +199,33 @@ impl HttpClient {
     /*.map(|_| {
         println!("\n\nDone.");
     });*/
+  }
+}
+
+struct DebugConnector(HttpConnector, Arc<Mutex<Option<u16>>>, Arc<Mutex<Status>>);
+
+impl Service for DebugConnector {
+  type Request = Uri;
+  type Response = TcpStream;
+  type Error = io::Error;
+  type Future = Box<Future<Item = TcpStream, Error = io::Error>>;
+
+  fn call(&self, uri: Uri) -> Self::Future {
+    let saved_port = self.1.clone();
+    let status     = self.2.clone();
+
+    Box::new(self.0.call(uri).map(move |s| {
+      let port = s.local_addr().expect("there shuld be an address").port();
+println!("new port: {}", port);
+      if let Ok(mut p) = saved_port.try_lock() {
+        *p = Some(port);
+      }
+
+      if let Ok(mut st) = status.try_lock() {
+        st.frontend_connection_closed += 1;
+      }
+
+      s
+    }))
   }
 }
